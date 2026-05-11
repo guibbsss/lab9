@@ -7,6 +7,7 @@ Passo 4: re-ranking com Cross-Encoder (top-3 para injeção de contexto).
 
 from __future__ import annotations
 
+import argparse
 import os
 from typing import List, Sequence
 
@@ -154,7 +155,14 @@ def main() -> None:
     print(f"Índice FAISS pronto. Vetores: {index.ntotal}, dim={index.d}, M={HNSW_M}, efConstruction={HNSW_EF_CONSTRUCTION}")
 
     default_query = "dor de cabeca latejante e luz incomodando muito"
-    user_query = os.environ.get("RAG_QUERY", default_query)
+    parser = argparse.ArgumentParser(description="Lab 9 — RAG HNSW + HyDE + Cross-Encoder (local)")
+    parser.add_argument(
+        "--query",
+        default=None,
+        help="Pergunta coloquial do usuario (se omitido, usa RAG_QUERY ou o exemplo do PDF).",
+    )
+    args = parser.parse_args()
+    user_query = args.query or os.environ.get("RAG_QUERY", default_query)
     print("\n--- HyDE (documento hipotetico) ---")
     print(f"Query coloquial: {user_query}")
     hypo = hyde_hypothetical_document(user_query)
