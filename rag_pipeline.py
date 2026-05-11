@@ -2,18 +2,18 @@
 Laboratório 9 — RAG com HNSW, HyDE (LLM local) e re-ranking com Cross-Encoder.
 
 Passo 1: corpus simulado, embeddings locais e índice FAISS HNSW.
-Passo 3: recuperação rápida (top-10) por similaridade de cosseno no HNSW.
+Passo 4: re-ranking com Cross-Encoder (top-3 para injeção de contexto).
 """
 
 from __future__ import annotations
 
 import os
-from typing import List
+from typing import List, Sequence
 
 import faiss
 import requests
 import numpy as np
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import CrossEncoder, SentenceTransformer
 
 # --- Hiperparâmetros HNSW (explícitos, conforme PDF) ---
 HNSW_M = 16
@@ -24,6 +24,8 @@ BI_ENCODER_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
+
+CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 # Fragmentos fictícios de manual clínico/técnico (jargão médico em PT-BR).
 MANUAL_FRAGMENTS: List[str] = [
@@ -122,6 +124,26 @@ def search_hnsw_topk(
     return scores[0], ids[0]
 
 
+def rerank_with_cross_encoder(
+    cross_encoder: CrossEncoder,
+    user_query: str,
+    doc_ids: Sequence[int],
+    corpus: List[str],
+) -> List[tuple[int, float, str]]:
+    """Passo 4: re-ranking com atenção query-documento (Cross-Encoder)."""
+    pairs: List[List[str]] = [[user_query, corpus[int(i)]] for i in doc_ids]
+    raw_scores = cross_encoder.predict(pairs, show_progress_bar=False)
+    ranked = sorted(
+        zip(doc_ids, raw_scores, [corpus[int(i)] for i in doc_ids]),
+        key=lambda x: float(x[1]),
+        reverse=True,
+    )
+    top3: List[tuple[int, float, str]] = [
+        (int(i), float(s), t) for i, s, t in ranked[:3]
+    ]
+    return top3
+
+
 def main() -> None:
     print(f"Fragmentos no corpus: {len(MANUAL_FRAGMENTS)}")
     print("Carregando bi-encoder local...")
@@ -145,6 +167,15 @@ def main() -> None:
     for rank, (doc_id, score) in enumerate(zip(ids.tolist(), scores.tolist()), start=1):
         snippet = MANUAL_FRAGMENTS[int(doc_id)][:220].replace("\n", " ")
         print(f"{rank:2d}. id={int(doc_id):2d}  score={score:.4f}  |  {snippet}...")
+
+    print("\n--- Top 3 apos Cross-Encoder (contexto final para o gerador) ---")
+    print("Carregando Cross-Encoder (pode demorar na primeira vez)...")
+    cross_encoder = CrossEncoder(CROSS_ENCODER_MODEL)
+    top3 = rerank_with_cross_encoder(cross_encoder, user_query, [int(i) for i in ids.tolist()], MANUAL_FRAGMENTS)
+    for rank, (doc_id, ce_score, full_text) in enumerate(top3, start=1):
+        print(f"{rank}. id={doc_id}  cross_encoder_score={ce_score:.4f}")
+        print(full_text)
+        print()
 
 
 if __name__ == "__main__":
