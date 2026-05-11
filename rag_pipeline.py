@@ -1,14 +1,17 @@
 """
 Laboratório 9 — RAG com HNSW, HyDE (LLM local) e re-ranking com Cross-Encoder.
 
-Passo 1 (este commit): corpus simulado, embeddings locais e índice FAISS HNSW.
+Passo 1: corpus simulado, embeddings locais e índice FAISS HNSW.
+Passo 2: HyDE com Ollama (LLM local) e vetorização do documento hipotético.
 """
 
 from __future__ import annotations
 
+import os
 from typing import List
 
 import faiss
+import requests
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
@@ -17,6 +20,9 @@ HNSW_M = 16
 HNSW_EF_CONSTRUCTION = 200
 
 BI_ENCODER_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
 
 # Fragmentos fictícios de manual clínico/técnico (jargão médico em PT-BR).
 MANUAL_FRAGMENTS: List[str] = [
@@ -67,6 +73,42 @@ def build_hnsw_index(embeddings: np.ndarray) -> faiss.Index:
     return index
 
 
+def hyde_hypothetical_document(user_query: str, ollama_model: str = OLLAMA_MODEL) -> str:
+    """
+    Passo 2 (HyDE): transforma uma pergunta coloquial em um trecho técnico fictício
+    (documento hipotético) via LLM local (Ollama).
+    """
+    prompt = (
+        "Voce e um medico especialista escrevendo um trecho de manual clinico interno, em portugues, "
+        "com terminologia tecnica (sem citar que e ficticio). "
+        "Escreva APENAS o paragrafo do manual (3 a 6 frases), direto ao ponto, sem saudacoes, "
+        "sem markdown, sem lista numerada.\n\n"
+        f"Pergunta coloquial do paciente: {user_query}\n\n"
+        "Trecho do manual:"
+    )
+    url = f"{OLLAMA_HOST.rstrip('/')}/api/generate"
+    response = requests.post(
+        url,
+        json={"model": ollama_model, "prompt": prompt, "stream": False},
+        timeout=180,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    text = (payload.get("response") or "").strip()
+    if not text:
+        raise RuntimeError(
+            "Ollama retornou texto vazio. Verifique se o servico esta rodando "
+            f"({url}) e se o modelo '{ollama_model}' existe (ex.: ollama pull {ollama_model})."
+        )
+    return text
+
+
+def embed_query_vector(model: SentenceTransformer, text: str) -> np.ndarray:
+    """Vetor denso normalizado (mesma âncora geométrica do HyDE)."""
+    vec = model.encode([text], convert_to_numpy=True, show_progress_bar=False)
+    return l2_normalize(np.asarray(vec, dtype=np.float32))
+
+
 def main() -> None:
     print(f"Fragmentos no corpus: {len(MANUAL_FRAGMENTS)}")
     print("Carregando bi-encoder local...")
@@ -75,6 +117,15 @@ def main() -> None:
     doc_embeddings = embed_texts(bi_encoder, MANUAL_FRAGMENTS)
     index = build_hnsw_index(doc_embeddings)
     print(f"Índice FAISS pronto. Vetores: {index.ntotal}, dim={index.d}, M={HNSW_M}, efConstruction={HNSW_EF_CONSTRUCTION}")
+
+    default_query = "dor de cabeca latejante e luz incomodando muito"
+    user_query = os.environ.get("RAG_QUERY", default_query)
+    print("\n--- HyDE (documento hipotetico) ---")
+    print(f"Query coloquial: {user_query}")
+    hypo = hyde_hypothetical_document(user_query)
+    print("Documento hipotetico (trecho):\n", hypo[:1200])
+    hyde_vec = embed_query_vector(bi_encoder, hypo)
+    print(f"\nVetor HyDE pronto: shape={hyde_vec.shape}, norma L2={float(np.linalg.norm(hyde_vec)):.4f}")
 
 
 if __name__ == "__main__":
