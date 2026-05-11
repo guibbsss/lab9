@@ -2,7 +2,7 @@
 Laboratório 9 — RAG com HNSW, HyDE (LLM local) e re-ranking com Cross-Encoder.
 
 Passo 1: corpus simulado, embeddings locais e índice FAISS HNSW.
-Passo 2: HyDE com Ollama (LLM local) e vetorização do documento hipotético.
+Passo 3: recuperação rápida (top-10) por similaridade de cosseno no HNSW.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from sentence_transformers import SentenceTransformer
 # --- Hiperparâmetros HNSW (explícitos, conforme PDF) ---
 HNSW_M = 16
 HNSW_EF_CONSTRUCTION = 200
+HNSW_EF_SEARCH = 64
 
 BI_ENCODER_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -109,6 +110,18 @@ def embed_query_vector(model: SentenceTransformer, text: str) -> np.ndarray:
     return l2_normalize(np.asarray(vec, dtype=np.float32))
 
 
+def search_hnsw_topk(
+    index: faiss.Index,
+    query_vector: np.ndarray,
+    k: int = 10,
+    ef_search: int = HNSW_EF_SEARCH,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Passo 3: busca aproximada no HNSW com vetor HyDE (cosseno via produto interno)."""
+    index.hnsw.efSearch = ef_search
+    scores, ids = index.search(query_vector.astype(np.float32), k)
+    return scores[0], ids[0]
+
+
 def main() -> None:
     print(f"Fragmentos no corpus: {len(MANUAL_FRAGMENTS)}")
     print("Carregando bi-encoder local...")
@@ -126,6 +139,12 @@ def main() -> None:
     print("Documento hipotetico (trecho):\n", hypo[:1200])
     hyde_vec = embed_query_vector(bi_encoder, hypo)
     print(f"\nVetor HyDE pronto: shape={hyde_vec.shape}, norma L2={float(np.linalg.norm(hyde_vec)):.4f}")
+
+    print("\n--- Top 10 recuperados (HNSW / bi-encoder, funil largo) ---")
+    scores, ids = search_hnsw_topk(index, hyde_vec, k=10)
+    for rank, (doc_id, score) in enumerate(zip(ids.tolist(), scores.tolist()), start=1):
+        snippet = MANUAL_FRAGMENTS[int(doc_id)][:220].replace("\n", " ")
+        print(f"{rank:2d}. id={int(doc_id):2d}  score={score:.4f}  |  {snippet}...")
 
 
 if __name__ == "__main__":
