@@ -1,61 +1,45 @@
-# Laboratório 9 — RAG com HNSW, HyDE e Cross-Encoder (local)
+# Lab 9 — busca em manual com RAG (HNSW + HyDE + cross-encoder)
 
-Implementação em Python do roteiro do laboratório: corpus simulado (≥20 fragmentos), embeddings com `sentence-transformers`, índice **FAISS HNSW** com `M` e `ef_construction` explícitos, **HyDE** via **Ollama** (LLM local), recuperação **top-10** e re-ranking com **Cross-Encoder** `cross-encoder/ms-marco-MiniLM-L-6-v2` (**top-3**).
+Sou o Guilherme Ruben. Esse repo é o laboratório 9: eu montei um pipeline em Python que finge um assistente em cima de trechos fictícios de manual médico. A ideia do PDF é mostrar onde a similaridade “burra” falha (pergunta de paciente vs jargão) e como dá pra melhorar com HyDE, índice rápido e um rerank mais forte.
 
-## Análise: HNSW vs KNN exato e uso de RAM
+O que mais me deu trabalho na prática foi encaixar tudo no mesmo script (`rag_pipeline.py`) sem depender de API paga: embeddings e cross-encoder rodam com `sentence-transformers`, o HyDE chama o Ollama na máquina, e o índice é FAISS com HNSW.
 
-No **KNN exato** clássico (ex.: força bruta ou estruturas que guardam todos os vetores para comparar distância a cada consulta), o consumo de RAM costuma crescer sobretudo com o **armazenamento da matriz de embeddings** \(N \times d\) e, em implementações ingênuas, com estruturas auxiliares mínimas. Cada busca pode exigir muitas distâncias completas.
+## Declaração (obrigatória pelo contrato)
 
-O **HNSW** (Hierarchical Navigable Small World) mantém um **grafo aproximado** em várias camadas: cada nó tem até **M** arestas (vizinhos) por camada em média. **Aumentar M** engrossa o grafo: mais ponteiros e metadados por vetor, o que **eleva a RAM** (e tende a melhorar recall/latência de busca). O parâmetro **ef_construction** controla o tamanho da lista dinâmica durante a **inserção** no índice: valores maiores exploram mais candidatos ao ligar cada ponto, gerando **grafos mais “bem conectados”** à custa de **mais RAM temporária na construção** e **indexação mais lenta**; em alguns casos o grafo final também fica mais denso, com impacto adicional na memória residente.
+Partes deste laboratório foram geradas/complementadas com IA, revisadas e validadas por Guilherme Ruben.
 
-Em resumo: frente a um KNN exato que pode ser CPU-intensivo na query, o HNSW troca parte do problema por **estrutura de grafo em memória** governada principalmente por **M** e pelo processo de construção (**ef_construction**), com **RAM** que cresce com a conectividade do grafo, não apenas com \(N \times d\).
+## HNSW: memória vs KNN exato (resposta curta do exercício)
 
-## Declaração obrigatória (Contrato Pedagógico)
+No KNN exato você basicamente guarda os vetores e compara a query com muitos deles; RAM sobe com a matriz N×d e a busca pode ficar pesada em CPU.
 
-> Partes deste laboratório foram geradas/complementadas com IA, revisadas e validadas por Guiri.
+No HNSW você mantém um grafo aproximado. O `M` controla quantos vizinhos cada ponto tende a ter: `M` maior costuma melhorar recall, mas aumenta estrutura em memória (mais arestas/ponteiros). O `ef_construction` mexe na qualidade do grafo na hora de construir: maior explora mais candidatos ao inserir, usa mais RAM na construção e deixa a indexação mais lenta, e o grafo pode ficar mais “cheio”.
 
-*(Substitua **Guiri** pelo seu nome completo se a disciplina exigir nome civil na entrega.)*
+Ou seja: você troca parte do custo de query do KNN exato por um custo fixo de grafo em RAM, regulado principalmente por `M` e pelo processo de construção.
 
-## Como rodar localmente
+## Como eu rodo aqui (Windows)
 
-1. **Python 3.10+** recomendado.
-2. Crie o ambiente e instale dependências:
+Precisa do Python, da venv, do Ollama aberto e do modelo baixado.
 
 ```powershell
-cd caminho\para\lab9
+cd C:\Users\guiri\OneDrive\Documentos\GitHub\lab9
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-```
-
-3. **Ollama** (LLM local para o HyDE): instale em [https://ollama.com](https://ollama.com), suba o serviço e baixe um modelo compatível, por exemplo:
-
-```powershell
 ollama pull llama3.2
-```
-
-O script usa por padrão `OLLAMA_MODEL=llama3.2` e `OLLAMA_HOST=http://127.0.0.1:11434` (ajuste com variáveis de ambiente se necessário).
-
-4. Execute o pipeline (na primeira vez o Hugging Face baixa os pesos do bi-encoder e do cross-encoder):
-
-```powershell
 python rag_pipeline.py
 ```
 
-Outra pergunta coloquial:
+Outra pergunta:
 
 ```powershell
 python rag_pipeline.py --query "fiquei tonto ao virar na cama de manha"
 ```
 
-Ou via variável de ambiente: `set RAG_QUERY=...` (CMD) / `$env:RAG_QUERY="..."` (PowerShell).
+Dicas rápidas: na primeira vez o Hugging Face baixa pesos (bi-encoder e cross-encoder), então demora. Se der erro de conexão na porta 11434, o Ollama não está rodando ou o modelo não existe — confere com `ollama list`.
 
-**Saída esperada:** construção do índice; bloco **HyDE** com o documento hipotético; **Top 10** do HNSW; **Top 3** após o cross-encoder (trechos que iriam para o contexto do gerador).
+## Entrega
 
-## Entrega (GitHub + versão)
-
-- Submeta o **link do repositório** na plataforma indicada pela disciplina.
-- A versão a ser corrigida deve ter **tag ou release `v1.0`**. Após validar tudo:
+Subo o link no que a disciplina pedir. A versão pra correção vai com tag `v1.0`:
 
 ```powershell
 git tag v1.0

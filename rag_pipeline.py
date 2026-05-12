@@ -1,10 +1,3 @@
-"""
-Laboratório 9 — RAG com HNSW, HyDE (LLM local) e re-ranking com Cross-Encoder.
-
-Passo 1: corpus simulado, embeddings locais e índice FAISS HNSW.
-Passo 4: re-ranking com Cross-Encoder (top-3 para injeção de contexto).
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -12,11 +5,10 @@ import os
 from typing import List, Sequence
 
 import faiss
-import requests
 import numpy as np
+import requests
 from sentence_transformers import CrossEncoder, SentenceTransformer
 
-# --- Hiperparâmetros HNSW (explícitos, conforme PDF) ---
 HNSW_M = 16
 HNSW_EF_CONSTRUCTION = 200
 HNSW_EF_SEARCH = 64
@@ -28,7 +20,6 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2")
 
 CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
-# Fragmentos fictícios de manual clínico/técnico (jargão médico em PT-BR).
 MANUAL_FRAGMENTS: List[str] = [
     "Cefaléia tensional: dor bilateral em pressão, sem náusea importante. Tratamento de primeira linha: AINEs.",
     "Cefaléia em salvas: dor periorbitária unilateral intensa, lacrimejamento e rinorreia ipsilateral.",
@@ -69,7 +60,6 @@ def embed_texts(model: SentenceTransformer, texts: List[str]) -> np.ndarray:
 
 
 def build_hnsw_index(embeddings: np.ndarray) -> faiss.Index:
-    """Índice HNSW com produto interno = cosseno após normalização L2 dos vetores."""
     dim = embeddings.shape[1]
     index = faiss.IndexHNSWFlat(dim, HNSW_M, faiss.METRIC_INNER_PRODUCT)
     index.hnsw.efConstruction = HNSW_EF_CONSTRUCTION
@@ -78,10 +68,6 @@ def build_hnsw_index(embeddings: np.ndarray) -> faiss.Index:
 
 
 def hyde_hypothetical_document(user_query: str, ollama_model: str = OLLAMA_MODEL) -> str:
-    """
-    Passo 2 (HyDE): transforma uma pergunta coloquial em um trecho técnico fictício
-    (documento hipotético) via LLM local (Ollama).
-    """
     prompt = (
         "Voce e um medico especialista escrevendo um trecho de manual clinico interno, em portugues, "
         "com terminologia tecnica (sem citar que e ficticio). "
@@ -108,7 +94,6 @@ def hyde_hypothetical_document(user_query: str, ollama_model: str = OLLAMA_MODEL
 
 
 def embed_query_vector(model: SentenceTransformer, text: str) -> np.ndarray:
-    """Vetor denso normalizado (mesma âncora geométrica do HyDE)."""
     vec = model.encode([text], convert_to_numpy=True, show_progress_bar=False)
     return l2_normalize(np.asarray(vec, dtype=np.float32))
 
@@ -119,7 +104,6 @@ def search_hnsw_topk(
     k: int = 10,
     ef_search: int = HNSW_EF_SEARCH,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Passo 3: busca aproximada no HNSW com vetor HyDE (cosseno via produto interno)."""
     index.hnsw.efSearch = ef_search
     scores, ids = index.search(query_vector.astype(np.float32), k)
     return scores[0], ids[0]
@@ -131,7 +115,6 @@ def rerank_with_cross_encoder(
     doc_ids: Sequence[int],
     corpus: List[str],
 ) -> List[tuple[int, float, str]]:
-    """Passo 4: re-ranking com atenção query-documento (Cross-Encoder)."""
     pairs: List[List[str]] = [[user_query, corpus[int(i)]] for i in doc_ids]
     raw_scores = cross_encoder.predict(pairs, show_progress_bar=False)
     ranked = sorted(
